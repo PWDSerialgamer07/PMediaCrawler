@@ -39,24 +39,23 @@ def exit_program():
 
 
 def kemono_coomer_downloader():
-    IDs = open_input_file('IDs.txt', item_type='IDs')
-    # Create temporary and output directories if they don't exist
+    inputs = open_input_file('IDs.txt', item_type='input')
     temp_directory = os.path.join(os.getcwd(), "tmp")
     output_dir = os.path.join(os.getcwd(), "output")
+
     if not os.path.exists(temp_directory):
         os.makedirs(temp_directory)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+
     source = 'L'
+    all_media_links = []
 
-    all_media_links = []  # List to hold all media links from different IDs
+    for input_data in inputs:
+        website = input_data['website']
+        service = input_data['service']
+        model = input_data['model']
 
-    for ID in IDs:
-        website = ID['website']
-        service = ID['service']
-        model = ID['model']
-
-        # Define api_url and base_url based on the website
         if website == 'coomer':
             api_url = 'https://coomer.su/api/v1/'
             base_url = 'https://coomer.su'
@@ -64,34 +63,37 @@ def kemono_coomer_downloader():
             api_url = 'https://kemono.su/api/v1/'
             base_url = 'https://kemono.su'
         else:
-            # Handle the case for unknown website
             print(
                 f"{Fore.PURPLE}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Unknown website: {website}{Style.RESET_ALL}")
-            continue  # Skip to the next ID
-
-        # Fetch information about all models
-        creators_info = fetch_creators_info(api_url)
-        if not creators_info:
-            print(
-                f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No creators information available. Exiting...{Style.RESET_ALL}")
-            return []
-
-        # Find the ID corresponding to the model name and service name
-        target_id = None
-        for creator in creators_info:
-            if creator.get('name').lower() == model.lower() and creator.get('service') == service:
-                target_id = creator.get('id')
-                print(
-                    Fore.MAGENTA + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Found ID for model: {model}, service: {service}. Starting processing..." + Style.RESET_ALL)
-                break
-
-        if target_id is None:
-            print(
-                f"{Fore.YELLOW}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No ID found for model: {model}, service: {service}. Skipping...{Style.RESET_ALL}")
             continue
 
+        if model.startswith("http"):
+            # Remove base_url from direct link
+            model = model.replace(base_url, '')
+            target_id = model
+        else:
+            creators_info = fetch_creators_info(api_url)
+            if not creators_info:
+                print(
+                    f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No creators information available. Exiting...{Style.RESET_ALL}")
+                return []
+
+            target_id = None
+            for creator in creators_info:
+                if creator.get('name').lower() == model.lower() and creator.get('service') == service:
+                    target_id = creator.get('id')
+                    print(
+                        Fore.MAGENTA + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Found ID for model: {model}, service: {service}. Starting processing..." + Style.RESET_ALL)
+                    break
+
+            if target_id is None:
+                print(
+                    f"{Fore.YELLOW}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No ID found for model: {model}, service: {service}. Skipping...{Style.RESET_ALL}")
+                continue
+
         offset = 0
-        media_links = []  # Initialize media_links list for each iteration
+        media_links = []
+
         while True:
             get_url = f'{api_url}/{service}/user/{target_id}?o={offset}'
             response = requests.get(get_url)
@@ -117,16 +119,13 @@ def kemono_coomer_downloader():
 
             offset += 50
 
-        # Extend the all_media_links list with the media_links of each ID
         all_media_links.extend(media_links)
 
-    # Download using multithreading
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         for url in all_media_links:
             executor.submit(download_stuff, url,
                             temp_directory, output_dir, source)
 
-    # Clean up temporary directory
     shutil.rmtree(temp_directory)
 
     print(Fore.GREEN +
@@ -363,7 +362,6 @@ def R34_downloader():
 def open_input_file(file_path, item_type='line', blacklist=False):
     """Open input file."""
     lines_data = []
-    model_id = None
 
     try:
         with open(file_path, 'r') as file:
@@ -379,14 +377,15 @@ def open_input_file(file_path, item_type='line', blacklist=False):
                         tags = [tag for tag in tags]
                     line_dict = {'tags': tags}
                     lines_data.append(line_dict)
-                elif item_type == 'IDs':
-                    if ':' in line:
+                elif item_type == 'input':
+                    if ':' in line:  # Assume it's in website:service:model format
                         website, service, model = line.split(':')
-                        model_id = model.strip()
-                    else:
-                        service = line.strip()
-                    lines_data.append(
-                        {'website': website, 'service': service, 'model': model_id})
+                        lines_data.append(
+                            {'website': website, 'service': service, 'model': model})
+                    elif line.startswith("http"):  # Assume it's a direct URL
+                        lines_data.append({'url': line})
+                    else:  # Assume it's just an ID
+                        lines_data.append({'id': line})
     except FileNotFoundError:
         print(f"File '{file_path}' not found. Creating a new one.")
 
