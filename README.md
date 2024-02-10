@@ -1,6 +1,6 @@
 ## Media Downloader
 
-This Python script allows you to download media content from various websites including Rule34.xxx, Luscious.net, and Kemono/Coomer. It supports multithreading for faster downloads and compression of images, gifs, and videos.
+This Python script allows you to download media content from various websites including Rule34.xxx, Luscious.net, and Kemono/Coomer. It supports multithreading for faster downloads and compression of images, gifs, and videos. Files will first be downloaded to tmp, before being compressed and put in output.
 
 ### Usage
 
