@@ -1,3 +1,4 @@
+import sys
 from PIL import Image
 import os
 import time
@@ -15,9 +16,17 @@ import hashlib
 from colorama import init, Fore, Style
 from datetime import datetime
 import json
+import sqlite3
+from progress.bar import ChargingBar
 # test results shoud be 173+39=212.
 # Initialize colorama
 init()
+
+# Database connection and setup
+conn = sqlite3.connect('downloads.db')
+c = conn.cursor()
+c.execute(
+    '''CREATE TABLE IF NOT EXISTS downloads (url TEXT PRIMARY KEY, filename TEXT)''')
 
 # global Variables
 r34_API_URL = "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index"
@@ -42,6 +51,9 @@ def kemono_coomer_downloader():
     inputs = open_input_file('IDs.txt', item_type='input')
     temp_directory = os.path.join(os.getcwd(), "tmp")
     output_dir = os.path.join(os.getcwd(), "output")
+    # Open database connection
+    conn = sqlite3.connect('downloads.db')
+    c = conn.cursor()
 
     if not os.path.exists(temp_directory):
         os.makedirs(temp_directory)
@@ -49,7 +61,7 @@ def kemono_coomer_downloader():
         os.makedirs(output_dir)
 
     source = 'L'
-    all_media_links = []
+    all_media_links = {'images': [], 'videos': [], 'gifs': []}
 
     for input_data in inputs:
         website = input_data['website']
@@ -119,17 +131,15 @@ def kemono_coomer_downloader():
 
             offset += 50
 
-        all_media_links.extend(media_links)
+        all_media_links['images'].extend(media_links)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        for url in all_media_links:
-            executor.submit(download_stuff, url,
-                            temp_directory, output_dir, source)
-
-    shutil.rmtree(temp_directory)
+    # Pass all_media_links dictionary to download_stuff function
+    download_stuff(all_media_links, temp_directory, output_dir, source)
+    conn.close()
 
     print(Fore.GREEN +
           f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
+    menu()
 
 
 def fetch_creators_info(api_url):
@@ -167,48 +177,87 @@ def download_menu():
         download_menu()
 
 
-def download_stuff(url, temp_directory, output_dir, source='R'):
-    """Downloads content from the given URL and saves it to the output directory.
+def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
+    """Downloads content from the given URLs and saves them to the output directory.
 
     Args:
-        url (str): The URL of the content to download.
+        urls_dict (dict): A dictionary containing URLs for images, videos, and gifs.
         temp_directory (str): The directory to store temporary downloaded files.
         output_dir (str): The directory where the compressed files will be saved.
         source (str): The source of the content.
     """
-    retry_urls = []  # List to store URLs that encountered errors for retry
+    # Create temporary directory if it doesn't exist
+    if not os.path.exists(temp_directory):
+        os.makedirs(temp_directory)
 
-    try:
-        # Send a GET request to download the content
-        response = requests.get(url)
+    # Count total number of URLs
+    total_urls = sum(len(urls) for urls in urls_dict.values())
 
-        # Check if request was successful
-        if response.status_code == 200:
-            # Generate a filename based on the URL hash
-            filename = hashlib.sha256(url.encode()).hexdigest() + ".jpeg"
-            filepath = os.path.join(temp_directory, filename)
+    # Progress bar setup
+    bar = ChargingBar('Downloading', max=total_urls)
 
-            # Write the content to a file
-            with open(filepath, 'wb') as file:
-                file.write(response.content)
+    # Retry URLs list to store URLs that encountered errors for retry
+    retry_urls = []
 
-            # Compress the downloaded file based on its type
-            compress_file(filepath, output_dir, source)
+    # Download and compress content
+    for urls in urls_dict.values():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            for url in urls:
+                try:
+                    # Send a GET request to download the content
+                    response = requests.get(url)
 
-            print(
-                Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded: {filename}" + Style.RESET_ALL)
-        else:
-            # If server error, add the URL to the retry list
-            print(
-                Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download: {url}. Status code: {response.status_code}" + Style.RESET_ALL)
-            retry_urls.append(url)
-    except Exception as e:
-        # If any exception occurs, add the URL to the retry list
-        print(
-            Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading {url}: {e}" + Style.RESET_ALL)
-        retry_urls.append(url)
+                    # Check if request was successful
+                    if response.status_code == 200:
+                        # Generate a filename based on the URL hash
+                        filename = hashlib.sha256(
+                            url.encode()).hexdigest() + ".jpeg"
+                        filepath = os.path.join(temp_directory, filename)
 
-    return retry_urls
+                        # Write the content to a file
+                        with open(filepath, 'wb') as file:
+                            file.write(response.content)
+
+                        # Compress the downloaded file based on its type
+                        compress_file(filepath, output_dir, source)
+
+                        print(
+                            Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded: {filename}" + Style.RESET_ALL)
+                    else:
+                        # If server error, add the URL to the retry list
+                        print(
+                            Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download: {url}. Status code: {response.status_code}" + Style.RESET_ALL)
+                        retry_urls.append(url)
+                except Exception as e:
+                    # If any exception occurs, add the URL to the retry list
+                    print(
+                        Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading {url}: {e}" + Style.RESET_ALL)
+                    retry_urls.append(url)
+
+                bar.next()  # Update progress bar
+
+    bar.finish()
+
+    # Retry downloading missing files
+    if retry_urls:
+        print(Fore.YELLOW + "Retrying to download missing files..." + Style.RESET_ALL)
+        retry_urls_dict = {
+            content_type: retry_urls for content_type in urls_dict}
+        download_stuff(retry_urls_dict, temp_directory, output_dir, source)
+
+    print(Fore.GREEN +
+          f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
+
+
+# Splitting console horizontally
+def split_console():
+    sys.stdout.write('\x1b[3;0f')  # Move cursor to row 3
+    sys.stdout.write('\x1b[2J')     # Clear the screen
+    sys.stdout.flush()
+
+    # Print logs on the top half
+    for _ in range(3):
+        print("\n")  # Insert blank lines to clear space for logs
 
 
 def compress_file(filepath, output_dir, source):
@@ -273,6 +322,9 @@ def compress_video(filepath, output_dir):
 def Luscious_downloader():
     # Open file to get album URLs
     album_urls = open_input_file('urls.txt', item_type='line')
+    # Open database connection
+    conn = sqlite3.connect('downloads.db')
+    c = conn.cursor()
 
     # Create temporary and output directories if they don't exist
     temp_directory = os.path.join(os.getcwd(), "tmp")
@@ -284,7 +336,7 @@ def Luscious_downloader():
     source = 'L'
 
     # Create a list to store all content URLs
-    all_urls = []
+    all_media_links = {'images': [], 'videos': [], 'gifs': []}
 
     # Iterate over album URLs and get content URLs
     for album_url in album_urls:
@@ -295,19 +347,14 @@ def Luscious_downloader():
             # Get the list of content URLs (image links) from the album
             content_urls = album.contentUrls
 
-            # Extend the all_urls list with content_urls
-            all_urls.extend(content_urls)
+            # Extend the all_media_links list with content_urls
+            all_media_links['images'].extend(content_urls)
         except Exception as e:
             print(f"Error processing album {album_url}: {e}")
 
-    # Download using multithreading
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-        for url in all_urls:
-            executor.submit(download_stuff, url,
-                            temp_directory, output_dir, source)
-
-    # Clean up temporary directory
-    shutil.rmtree(temp_directory)
+    # Pass all_media_links dictionary to download_stuff function
+    download_stuff(all_media_links, temp_directory, output_dir, source)
+    conn.close()
 
     print(Fore.GREEN +
           f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
@@ -320,6 +367,9 @@ def R34_downloader():
     blacklisted = open_input_file(
         'blacklisted.txt', item_type='tags', blacklist=True)
     source = "R"
+    # Open database connection
+    conn = sqlite3.connect('downloads.db')
+    c = conn.cursor()
 
     temp_directory = os.path.join(os.getcwd(), "tmp")
     output_dir = os.path.join(os.getcwd(), "output")
@@ -328,7 +378,9 @@ def R34_downloader():
         os.makedirs(temp_directory)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    all_urls = []
+
+    all_media_links = {'images': [], 'videos': [], 'gifs': []}
+
     for tag_dict in tag_dicts:
         tags = tag_dict['tags']
         print(Fore.MAGENTA +
@@ -342,17 +394,13 @@ def R34_downloader():
             urls = [post.get('file_url') for post in root.findall('.//post')]
             if not urls:  # If no more URLs are found, break the loop
                 break
-            all_urls.extend(urls)
+
+            all_media_links['images'].extend(urls)
             page += 1
 
-    # Download using multithreading
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-        for url in all_urls:
-            executor.submit(download_stuff, url,
-                            temp_directory, output_dir, source)
-
-    # Clean up temporary directory
-    shutil.rmtree(temp_directory)
+    # Pass all_media_links dictionary to download_stuff function
+    download_stuff(all_media_links, temp_directory, output_dir, source)
+    conn.close()
 
     print(Fore.GREEN +
           f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
@@ -422,8 +470,30 @@ def menu():
 
 def main():
     """Main function."""
+    # Define output directory
+    output_dir = os.path.join(os.getcwd(), "output")
+
+    # Get set of filenames from the output directory
+    output_filenames_set = {filename for filename in os.listdir(
+        output_dir) if os.path.isfile(os.path.join(output_dir, filename))}
+
+    # Get set of filenames from the database
+    c.execute("SELECT filename FROM downloads")
+    db_filenames_set = {row[0] for row in c.fetchall()}
+
+    # Find filenames in the database that are not present in the output directory
+    missing_files = db_filenames_set - output_filenames_set
+
+    # Remove URLs from database for missing files
+    for filename in missing_files:
+        print(Fore.YELLOW +
+              f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Removing entry from database for missing file: {filename}" + Style.RESET_ALL)
+        c.execute("DELETE FROM downloads WHERE filename = ?", (filename,))
+        conn.commit()
+    split_console()  # split console
     menu()
 
 
 if __name__ == "__main__":
+
     main()
