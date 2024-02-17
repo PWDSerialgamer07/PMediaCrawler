@@ -440,26 +440,6 @@ def R34_downloader():
             for media_type, urls in media_links.items():
                 all_media_links[media_type].extend(urls)
 
-    # Calculate total size of all files
-    total_size_bytes = sum(int(requests.head(url).headers.get(
-        'Content-Length', 0)) for urls in all_media_links.values() for url in urls)
-    total_size = total_size_bytes
-
-    # Convert total size to appropriate units
-    units = ['bytes', 'KB', 'MB', 'GB', 'TB']
-    for unit in units:
-        if total_size < 1024.0:
-            break
-        total_size /= 1024.0
-
-    # Prompt user for confirmation
-    confirmation = input(
-        Fore.YELLOW + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] This will download a total of {len(all_media_links)} items with a total size of {total_size:.2f} {unit}. Do you want to continue? (yes/no): " + Style.RESET_ALL)
-    if confirmation.lower() != 'yes':
-        print(Fore.YELLOW +
-              f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Download aborted." + Style.RESET_ALL)
-        menu()
-
     # Pass all_media_links dictionary to download_stuff function
     download_stuff(all_media_links, temp_directory, output_dir, source)
 
