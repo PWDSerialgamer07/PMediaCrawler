@@ -46,11 +46,12 @@ It supports a databse for handling duplicates and redownloading stuff that "got 
 This script is for educational purposes only. Respect the terms of service of the websites you are downloading content from. Be mindful of the content you download and ensure it complies with legal regulations and community guidelines.
 
 ### Planned
-- Settings Menu
-- Support for Pixiv
-- Download Resuming
-- Download History (one better than the current one)
-- Integration with cloud storage
-- File based logging
-- Better terminal splitting
-- File organisation option
+- [ ] Settings Menu
+- [ ] Support for Pixiv
+- [ ] Download Resuming
+- [ ] Download History (one better than the current one)
+- [ ] Integration with cloud storage
+- [ ] File based logging
+- [ ] Better terminal splitting
+- [ ] File organisation option
+- [ ] Some way to differentiate images with their tags/URLs
