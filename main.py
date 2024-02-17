@@ -21,6 +21,14 @@ from progress.bar import ChargingBar
 # Initialize colorama
 init()
 
+# List of handled error codes
+ERROR_CODES = {
+    503: "Service Unavailable",
+    502: "Bad Gateway",
+    504: "Gateway Timeout",
+    429: "Too Many Requests",
+    # Add more error codes as needed
+}
 # Database connection and setup
 conn = sqlite3.connect('downloads.db')
 c = conn.cursor()
@@ -214,10 +222,12 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
                     Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded: {filename}" + Style.RESET_ALL)
             else:
                 # If server error, add the URL to the retry list
+                error_msg = ERROR_CODES.get(
+                    response.status_code, "Unknown Error")
                 print(
-                    Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download: {url}. Status code: {response.status_code}" + Style.RESET_ALL)
+                    Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download: {url}. Status code: {response.status_code} ({error_msg})" + Style.RESET_ALL)
                 retry_urls.append(url)
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             # If any exception occurs, add the URL to the retry list
             print(
                 Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading {url}: {e}" + Style.RESET_ALL)
