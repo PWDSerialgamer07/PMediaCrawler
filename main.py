@@ -178,14 +178,6 @@ def download_menu():
 
 
 def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
-    """Downloads content from the given URLs and saves them to the output directory.
-
-    Args:
-        urls_dict (dict): A dictionary containing URLs for images, videos, and gifs.
-        temp_directory (str): The directory to store temporary downloaded files.
-        output_dir (str): The directory where the compressed files will be saved.
-        source (str): The source of the content.
-    """
     # Create temporary directory if it doesn't exist
     if not os.path.exists(temp_directory):
         os.makedirs(temp_directory)
@@ -211,25 +203,15 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
                 filename = hashlib.sha256(url.encode()).hexdigest() + ".jpeg"
                 filepath = os.path.join(temp_directory, filename)
 
-                # Write the content to a temporary file
+                # Write the content to a file
                 with open(filepath, 'wb') as file:
                     file.write(response.content)
 
-                # Check if the file exists and has the expected size
-                expected_size = int(response.headers.get('Content-Length', 0))
-                actual_size = os.path.getsize(filepath)
+                # Compress the downloaded file based on its type
+                compress_file(filepath, output_dir, source)
 
-                if actual_size == expected_size and actual_size > 0:
-                    # Compress the downloaded file based on its type
-                    compress_file(filepath, output_dir, source)
-
-                    print(
-                        Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded and compressed: {filename}" + Style.RESET_ALL)
-                else:
-                    print(
-                        Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Incomplete download or empty file for: {url}. Deleting..." + Style.RESET_ALL)
-                    retry_urls.append(url)
-                    os.remove(filepath)  # Delete incomplete file
+                print(
+                    Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded: {filename}" + Style.RESET_ALL)
             else:
                 # If server error, add the URL to the retry list
                 print(
@@ -243,8 +225,9 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
 
         # Update progress bar
         bar.next()
+
     # Download and compress content using a ThreadPoolExecutor
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
         # Submit tasks for each URL
         futures = [executor.submit(download_and_compress, url)
                    for urls in urls_dict.values() for url in urls]
@@ -254,11 +237,27 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
 
     bar.finish()
 
+    # Get list of filenames in temporary directory
+    tmp_files = os.listdir(temp_directory)
+
+    # Get set of filenames from the database
+    c.execute("SELECT filename FROM downloads")
+    db_filenames_set = {row[0] for row in c.fetchall()}
+
+    # Identify missing or corrupted files and add them to retry list
+    for filename in tmp_files:
+        if filename not in db_filenames_set:
+            retry_urls.append(os.path.join(temp_directory, filename))
+
     # Retry downloading missing files
     if retry_urls:
-        print(Fore.YELLOW + "Retrying to download missing files..." + Style.RESET_ALL)
+        print(Fore.YELLOW +
+              "Retrying to download missing or corrupted files..." + Style.RESET_ALL)
         retry_urls_dict = {
-            content_type: retry_urls for content_type in urls_dict}
+            'images': retry_urls,
+            'videos': [],
+            'gifs': []
+        }
         download_stuff(retry_urls_dict, temp_directory, output_dir, source)
 
     print(Fore.GREEN +
