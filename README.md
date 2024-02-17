@@ -41,6 +41,15 @@ It supports a databse for handling duplicates and redownloading stuff that "got 
 - `moviepy`
 - `colorama`
 
+### Handled Errors
+
+These are the error codes that if received when downloading a file will have that file added to the retry list to be reattempted later:
+- 503: Service Unavailable
+- 502: Bad Gateway
+- 504: Gateway Timeout
+- 429: Too Many Requests
+Will add more if needed
+
 ### Disclaimer
 
 This script is for educational purposes only. Respect the terms of service of the websites you are downloading content from. Be mindful of the content you download and ensure it complies with legal regulations and community guidelines.
