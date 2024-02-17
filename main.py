@@ -18,7 +18,6 @@ from datetime import datetime
 import json
 import sqlite3
 from progress.bar import ChargingBar
-# test results shoud be 173+39=212.
 # Initialize colorama
 init()
 
@@ -32,6 +31,7 @@ c.execute(
 r34_API_URL = "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index"
 IMAGE_QUALITY = 18
 VIDEO_BITRATE = "1500K"
+MAX_WORKERS = 50
 
 
 def clear_terminal():
@@ -199,42 +199,58 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
     # Retry URLs list to store URLs that encountered errors for retry
     retry_urls = []
 
-    # Download and compress content
-    for urls in urls_dict.values():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            for url in urls:
-                try:
-                    # Send a GET request to download the content
-                    response = requests.get(url)
+    # Define the function to download and compress a single URL
+    def download_and_compress(url):
+        try:
+            # Send a GET request to download the content
+            response = requests.get(url)
 
-                    # Check if request was successful
-                    if response.status_code == 200:
-                        # Generate a filename based on the URL hash
-                        filename = hashlib.sha256(
-                            url.encode()).hexdigest() + ".jpeg"
-                        filepath = os.path.join(temp_directory, filename)
+            # Check if request was successful
+            if response.status_code == 200:
+                # Generate a filename based on the URL hash
+                filename = hashlib.sha256(url.encode()).hexdigest() + ".jpeg"
+                filepath = os.path.join(temp_directory, filename)
 
-                        # Write the content to a file
-                        with open(filepath, 'wb') as file:
-                            file.write(response.content)
+                # Write the content to a temporary file
+                with open(filepath, 'wb') as file:
+                    file.write(response.content)
 
-                        # Compress the downloaded file based on its type
-                        compress_file(filepath, output_dir, source)
+                # Check if the file exists and has the expected size
+                expected_size = int(response.headers.get('Content-Length', 0))
+                actual_size = os.path.getsize(filepath)
 
-                        print(
-                            Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded: {filename}" + Style.RESET_ALL)
-                    else:
-                        # If server error, add the URL to the retry list
-                        print(
-                            Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download: {url}. Status code: {response.status_code}" + Style.RESET_ALL)
-                        retry_urls.append(url)
-                except Exception as e:
-                    # If any exception occurs, add the URL to the retry list
+                if actual_size == expected_size and actual_size > 0:
+                    # Compress the downloaded file based on its type
+                    compress_file(filepath, output_dir, source)
+
                     print(
-                        Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading {url}: {e}" + Style.RESET_ALL)
+                        Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded and compressed: {filename}" + Style.RESET_ALL)
+                else:
+                    print(
+                        Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Incomplete download or empty file for: {url}. Deleting..." + Style.RESET_ALL)
                     retry_urls.append(url)
+                    os.remove(filepath)  # Delete incomplete file
+            else:
+                # If server error, add the URL to the retry list
+                print(
+                    Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download: {url}. Status code: {response.status_code}" + Style.RESET_ALL)
+                retry_urls.append(url)
+        except Exception as e:
+            # If any exception occurs, add the URL to the retry list
+            print(
+                Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading {url}: {e}" + Style.RESET_ALL)
+            retry_urls.append(url)
 
-                bar.next()  # Update progress bar
+        # Update progress bar
+        bar.next()
+    # Download and compress content using a ThreadPoolExecutor
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Submit tasks for each URL
+        futures = [executor.submit(download_and_compress, url)
+                   for urls in urls_dict.values() for url in urls]
+
+    # Wait for all tasks to complete
+    concurrent.futures.wait(futures)
 
     bar.finish()
 
@@ -381,25 +397,43 @@ def R34_downloader():
 
     all_media_links = {'images': [], 'videos': [], 'gifs': []}
 
-    for tag_dict in tag_dicts:
+    # Define the function to process tags and retrieve URLs
+    def process_tags(tag_dict):
         tags = tag_dict['tags']
         print(Fore.MAGENTA +
               f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Started processing tags: {tags}" + Style.RESET_ALL)
 
         page = 0
+        media_links = {'images': [], 'videos': [], 'gifs': []}
         while True:
             url = f"{r34_API_URL}&limit=1000&tags={'%20'.join(tags)}%20{'%20'.join(blacklisted)}&pid={page}"
             response = requests.get(url)
             root = ET.fromstring(response.content)
-            urls = [post.get('file_url') for post in root.findall('.//post')]
+            urls = [post.get('file_url')
+                    for post in root.findall('.//post')]
             if not urls:  # If no more URLs are found, break the loop
                 break
 
-            all_media_links['images'].extend(urls)
+            media_links['images'].extend(urls)
             page += 1
+
+        return media_links
+
+    # Process tags and retrieve URLs using a ThreadPoolExecutor
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Submit tasks for each tag dictionary
+        futures = [executor.submit(process_tags, tag_dict)
+                   for tag_dict in tag_dicts]
+
+        # Retrieve results and merge into the main dictionary
+        for future in concurrent.futures.as_completed(futures):
+            media_links = future.result()
+            for media_type, urls in media_links.items():
+                all_media_links[media_type].extend(urls)
 
     # Pass all_media_links dictionary to download_stuff function
     download_stuff(all_media_links, temp_directory, output_dir, source)
+
     conn.close()
 
     print(Fore.GREEN +
