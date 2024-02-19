@@ -3,10 +3,11 @@ from PIL import Image
 import os
 import time
 import requests
-import threading
+from threading import Lock
 import luscious
 import xml.etree.ElementTree as ET
 import shutil
+from queue import Queue
 from PIL import Image, JpegImagePlugin
 import piexif
 from pygifsicle import optimize as optimize_gif
@@ -17,7 +18,6 @@ import hashlib
 from colorama import init, Fore, Style
 from datetime import datetime
 import json
-import sqlite3
 from progress.bar import ChargingBar
 
 # Initialize colorama
@@ -35,89 +35,6 @@ ERROR_CODES = {
     503: "Service Unavailable",
     504: "Gateway Timeout"
 }  # Add more if needed.
-
-
-class DBManager:  # Database connection and setup
-    def __init__(self, db_name='downloads.db'):
-        self.db_name = db_name
-        self.conn = None
-        self.cursor = None
-        self.connect()
-
-    def connect(self):
-        try:
-            self.conn = sqlite3.connect(self.db_name)
-            self.cursor = self.conn.cursor()
-            print(
-                Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Database connected successfully." + Style.RESET_ALL)
-        except sqlite3.Error as e:
-            print(
-                Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error connecting to database: {e}" + Style.RESET_ALL)
-            sys.exit(1)
-
-    def close(self):
-        if self.conn:
-            self.conn.close()
-            print(
-                Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Database connection closed." + Style.RESET_ALL)
-
-    def create_table(self):
-        try:
-            self.cursor.execute(
-                '''CREATE TABLE IF NOT EXISTS downloads (url TEXT PRIMARY KEY, filename TEXT)''')
-            print(
-                Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Table created successfully." + Style.RESET_ALL)
-        except sqlite3.Error as e:
-            print(
-                Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error creating table: {e}" + Style.RESET_ALL)
-            sys.exit(1)
-
-    def insert_data(self, url, filename):
-        try:
-            # Extract the file extension from the URL
-            file_extension = os.path.splitext(url)[1]
-
-            # Combine filename and extension
-            filename_with_extension = filename + file_extension
-
-            # Connect to the database
-            with sqlite3.connect(self.db_name) as conn:
-                cursor = conn.cursor()
-                # Execute the INSERT query
-                cursor.execute(
-                    "INSERT INTO downloads (url, filename) VALUES (?, ?)", (url, filename_with_extension))
-                conn.commit()
-                print(
-                    f"{Fore.YELLOW}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Inserted into database: {url}, {filename_with_extension}{Style.RESET_ALL}")
-        except sqlite3.Error as e:
-            print(
-                f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error inserting data: {e}{Style.RESET_ALL}")
-
-    def db_filenames_set(self):
-        self.cursor.execute("SELECT filename FROM downloads")
-        return {row[0] for row in self.cursor.fetchall()}
-
-    def remove_entry(self, filename):
-        try:
-            self.cursor.execute(
-                "DELETE FROM downloads WHERE filename=?", (filename,))
-            self.conn.commit()
-            print(
-                Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Removed entry from database for missing file: {filename}" + Style.RESET_ALL)
-        except sqlite3.Error as e:
-            print(
-                Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error removing entry from database: {e}" + Style.RESET_ALL)
-
-    def db_urls_set(self):
-        try:
-            with self.conn:
-                self.cursor.execute("SELECT url FROM downloads")
-                return {row[0] for row in self.cursor.fetchall()}
-        except sqlite3.Error as e:
-            print(
-                f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error fetching URLs from database: {e}{Style.RESET_ALL}")
-            return set()
-
 
 # Global Variables
 r34_API_URL = "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index"
@@ -156,44 +73,38 @@ def download_menu():
         download_menu()
 
 
-def download_stuff(urls_dict, temp_directory, output_dir, source='R', db_manager=None):
+def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
     # Create temporary directory if it doesn't exist
     if not os.path.exists(temp_directory):
         os.makedirs(temp_directory)
 
     # Count total number of URLs
     total_urls = sum(len(urls) for urls in urls_dict.values())
-
+    count = 0
     # Progress bar setup
-    bar = ChargingBar(f'Downloading [0/{total_urls}]', max=total_urls)
+    bar = ChargingBar(max=total_urls)
 
     # Retry URLs list to store URLs that encountered errors for retry
     retry_urls = []
 
     # Define the function to download and compress a single URL
+
     def download_and_compress(url):
+        nonlocal count
         nonlocal bar
         nonlocal retry_urls
         try:
-            # Create a new DBManager instance within the current thread
-            local_db_manager = DBManager()
-
-            # Check if URL exists in the database
-            if local_db_manager and url in local_db_manager.db_urls_set():
-                print(
-                    Fore.YELLOW + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] URL already exists in the database. Skipping: {url}" + Style.RESET_ALL)
-                bar.next()  # Increment the progress bar
-                return
-
+            count += 1  # Increment count atomically
+            # Update progress bar
+            percentage = int((count / total_urls) * 100)  # percentage
+            bar.index = count
+            bar.suffix = f'[{count}/{total_urls} ({percentage}%)]'
             # Determine file type based on URL extension
             if url.endswith('.mp4') or url.endswith('.webm'):
-                media_type = 'video'
                 file_extension = '.mp4'
             elif url.endswith('.gif'):
-                media_type = 'gif'
                 file_extension = '.gif'
             else:
-                media_type = 'image'
                 file_extension = '.jpeg'  # Adjust this if images have different extensions
 
             # Send a GET request to download the content
@@ -212,11 +123,6 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R', db_manager
 
                 # Compress the downloaded file based on its type
                 compress_file(filepath, output_dir, source)
-
-                # Insert the URL and filename into the database
-                print(
-                    Fore.YELLOW + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Inserting into database: {url}, {filename}" + Style.RESET_ALL)
-                db_manager.insert_data(url, filename)
                 print(
                     Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded: {filename}" + Style.RESET_ALL)
 
@@ -232,10 +138,6 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R', db_manager
             print(
                 Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading {url}: {e}" + Style.RESET_ALL)
             retry_urls.append(url)
-        finally:
-            # Close the database connection
-            if local_db_manager:
-                local_db_manager.close()
 
         # Increment the current item counter
         bar.next()
@@ -250,14 +152,6 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R', db_manager
     # Wait for all tasks to complete
     bar.finish()
 
-    # Get list of filenames in temporary directory
-    tmp_files = os.listdir(temp_directory)
-
-    # Identify missing or corrupted files and add them to retry list
-    for filename in tmp_files:
-        if not db_manager or filename not in db_manager.db_filenames_set():
-            retry_urls.append(os.path.join(temp_directory, filename))
-
     # Retry downloading missing files
     if retry_urls:
         print(Fore.PURPLE +
@@ -269,9 +163,8 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R', db_manager
             'gifs': []
         }
         download_stuff(retry_urls_dict, temp_directory,
-                       output_dir, source, db_manager)
-
-    print(Fore.MAGENTA +
+                       output_dir, source)
+    print(Fore.GREEN +
           f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
     input("Press enter to return to the menu")
     menu()
@@ -281,7 +174,6 @@ def kemono_coomer_downloader():
     inputs = open_input_file('IDs.txt', item_type='input')
     temp_directory = os.path.join(os.getcwd(), "tmp")
     output_dir = os.path.join(os.getcwd(), "output")
-    db_manager = DBManager()
 
     if not os.path.exists(temp_directory):
         os.makedirs(temp_directory)
@@ -363,13 +255,7 @@ def kemono_coomer_downloader():
 
     # Pass all_media_links dictionary to download_stuff function
     download_stuff(all_media_links, temp_directory,
-                   output_dir, source, db_manager)
-
-    db_manager.close()
-
-    print(Fore.GREEN +
-          f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
-    menu()
+                   output_dir, source)
 
 
 def fetch_creators_info(api_url):
@@ -393,8 +279,6 @@ def fetch_creators_info(api_url):
 def Luscious_downloader():
     # Open file to get album URLs
     album_urls = open_input_file('urls.txt', item_type='line')
-    # Create database manager instance
-    db_manager = DBManager()
     # Create temporary and output directories if they don't exist
     temp_directory = os.path.join(os.getcwd(), "tmp")
     output_dir = os.path.join(os.getcwd(), "output")
@@ -421,23 +305,21 @@ def Luscious_downloader():
 
     # Pass all_media_links dictionary to download_stuff function
     download_stuff(all_media_links, temp_directory,
-                   output_dir, source, db_manager)
-
-    db_manager.close()
-
-    print(Fore.GREEN +
-          f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
-    menu()
+                   output_dir, source)
 
 
 def R34_downloader():
     """Download content from R34."""
     tag_dicts = open_input_file('tags.txt', item_type='tags')
-    blacklisted = open_input_file(
+    blacklisted_tags = open_input_file(
         'blacklisted.txt', item_type='tags', blacklist=True)
+    if isinstance(blacklisted_tags, list):
+        blacklisted_tags = set(
+            [tag for tag_set in blacklisted_tags for tag in tag_set['tags']])
+    else:
+        blacklisted_tags = blacklisted_tags.get('tags', set())
     source = "R"
     # Create database manager instance
-    db_manager = DBManager()
 
     temp_directory = os.path.join(os.getcwd(), "tmp")
     output_dir = os.path.join(os.getcwd(), "output")
@@ -458,7 +340,10 @@ def R34_downloader():
         page = 0
         media_links = {'images': [], 'videos': [], 'gifs': []}
         while True:
-            url = f"{r34_API_URL}&limit=1000&tags={'%20'.join(tags)}%20{'%20'.join(blacklisted)}&pid={page}"
+            # Ensure tags and blacklisted_tags are sets
+            tags_set = set(tags)
+            all_tags = tags_set.union(blacklisted_tags)
+            url = f"{r34_API_URL}&limit=1000&tags={'%20'.join(all_tags)}&pid={page}"
             response = requests.get(url)
             root = ET.fromstring(response.content)
             posts = root.findall('.//post')
@@ -500,13 +385,7 @@ def R34_downloader():
 
     # Pass all_media_links dictionary to download_stuff function
     download_stuff(all_media_links, temp_directory,
-                   output_dir, source, db_manager)
-
-    db_manager.close()
-
-    print(Fore.GREEN +
-          f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
-    menu()
+                   output_dir, source)
 
 
 def compress_file(filepath, output_dir, source):
@@ -643,23 +522,6 @@ def menu():
 
 def main():
     """Main function."""
-    # Define output directory
-    output_dir = os.path.join(os.getcwd(), "output")
-
-    # Get set of filenames from the output directory
-    output_filenames_set = {filename for filename in os.listdir(
-        output_dir) if os.path.isfile(os.path.join(output_dir, filename))}
-
-    db_manager = DBManager()
-    # Get set of filenames from the database
-    db_filenames_set = db_manager.db_filenames_set()
-    # Remove URLs from database for missing files
-    missing_files = db_filenames_set - output_filenames_set
-    for filename in missing_files:
-        print(Fore.YELLOW +
-              f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Removing entry from database for missing file: {filename}" + Style.RESET_ALL)
-        db_manager.remove_entry(filename)
-    db_manager.close()
     split_console()  # split console
     menu()
 
