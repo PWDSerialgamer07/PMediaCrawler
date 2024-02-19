@@ -18,6 +18,8 @@ import hashlib
 from colorama import init, Fore, Style
 from datetime import datetime
 import json
+import gzip
+import atexit
 from progress.bar import ChargingBar
 
 # Initialize colorama
@@ -41,6 +43,47 @@ r34_API_URL = "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index"
 IMAGE_QUALITY = 18
 VIDEO_BITRATE = "150K"
 MAX_WORKERS = 50
+LOGS_DIR = "logs"
+LOG_FILE = f"{LOGS_DIR}/logs_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+ARCHIVE_NAME = f"{LOGS_DIR}/logs_archive_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.gz"
+
+
+def setup_logging():
+    if not os.path.exists(LOGS_DIR):
+        os.makedirs(LOGS_DIR)
+    sys.stdout = Logger(open(LOG_FILE, 'a'))  # Redirect stdout to log file
+
+
+class Logger:
+    def __init__(self, file):
+        self.terminal = sys.stdout
+        self.logfile = file
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.logfile.write(message)
+
+    def flush(self):
+        pass
+
+
+def archive_logs():
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, 'rb') as f_in:
+            with gzip.open(ARCHIVE_NAME, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        os.remove(LOG_FILE)
+        # Rename the archived file with the .txt extension
+        os.rename(ARCHIVE_NAME, f"{ARCHIVE_NAME}.txt")
+
+
+def cleanup():
+    if not hasattr(sys.stdout, "logfile") or not sys.stdout.logfile.closed:
+        print(
+            f"[{datetime.now()}] Program and logging stopped through the exit menu option.")
+        if hasattr(sys.stdout, "logfile"):
+            sys.stdout.logfile.close()  # Close the log file
+        archive_logs()  # Archive old logs
 
 
 def clear_terminal():
@@ -52,6 +95,10 @@ def exit_program():
     """Exit the program."""
     clear_terminal()
     print(Fore.GREEN + "Goodbye..." + Style.RESET_ALL)
+    print(
+        Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Closing Program and logging.")
+    sys.stdout.logfile.close()
+    archive_logs()  # Archive old logs
     time.sleep(2)
     sys.exit(0)
 
@@ -96,9 +143,8 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
         try:
             count += 1  # Increment count atomically
             # Update progress bar
-            percentage = int((count / total_urls) * 100)  # percentage
             bar.index = count
-            bar.suffix = f'[{count}/{total_urls} ({percentage}%)]'
+            bar.suffix = f'[{count}/{total_urls}]'
             # Determine file type based on URL extension
             if url.endswith('.mp4') or url.endswith('.webm'):
                 file_extension = '.mp4'
@@ -522,9 +568,15 @@ def menu():
 
 def main():
     """Main function."""
+    setup_logging()
+    print(f"[{datetime.now()}] Program and logging started")
     split_console()  # split console
+    atexit.register(cleanup)  # Register cleanup function
     menu()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        exit_program()  # Perform cleanup if Ctrl+C is pressed
