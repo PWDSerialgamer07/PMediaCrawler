@@ -50,6 +50,9 @@ These are the error codes that if received when downloading a file will have tha
 - 429: Too Many Requests
 Will add more if needed
 
+### Known bugs
+- Archived logs will lack a file extension (no idea how to fix this)
+
 ### Disclaimer
 
 This script is for educational purposes only. Respect the terms of service of the websites you are downloading content from. Be mindful of the content you download and ensure it complies with legal regulations and community guidelines.
