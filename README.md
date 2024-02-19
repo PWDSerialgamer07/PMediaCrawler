@@ -58,9 +58,10 @@ This script is for educational purposes only. Respect the terms of service of th
 - [ ] Settings Menu
 - [ ] Support for Pixiv
 - [ ] Download Resuming
-- [ ] Download History (one better than the current one)
+- [ ] Download History
 - [ ] Integration with cloud storage
-- [ ] File based logging
+- [x] File based logging
 - [ ] Better terminal splitting
 - [ ] File organisation option
 - [ ] Some way to differentiate images with their tags/URLs
+- [ ] Mega.nz support
