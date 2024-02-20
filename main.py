@@ -21,7 +21,7 @@ import json
 import gzip
 import atexit
 from progress.bar import ChargingBar
-
+import re
 # Initialize colorama
 init()
 
@@ -46,6 +46,7 @@ MAX_WORKERS = 50
 LOGS_DIR = "logs"
 LOG_FILE = f"{LOGS_DIR}/logs_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
 ARCHIVE_NAME = f"{LOGS_DIR}/logs_archive_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.gz"
+RETRIES = 3
 
 
 def setup_logging():
@@ -60,8 +61,10 @@ class Logger:
         self.logfile = file
 
     def write(self, message):
+        # Remove color codes before writing to the log file
+        message_no_color = re.sub(r'\x1b\[[0-9;]*m', '', message)
         self.terminal.write(message)
-        self.logfile.write(message)
+        self.logfile.write(message_no_color)
 
     def flush(self):
         pass
@@ -73,14 +76,12 @@ def archive_logs():
             with gzip.open(ARCHIVE_NAME, 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
         os.remove(LOG_FILE)
-        # Rename the archived file with the .txt extension
-        os.rename(ARCHIVE_NAME, f"{ARCHIVE_NAME}.txt")
 
 
 def cleanup():
     if not hasattr(sys.stdout, "logfile") or not sys.stdout.logfile.closed:
         print(
-            f"[{datetime.now()}] Program and logging stopped through the exit menu option.")
+            Fore.MAGENTA + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Program and logging stopped through the exit menu option.")
         if hasattr(sys.stdout, "logfile"):
             sys.stdout.logfile.close()  # Close the log file
         archive_logs()  # Archive old logs
@@ -96,7 +97,7 @@ def exit_program():
     clear_terminal()
     print(Fore.GREEN + "Goodbye..." + Style.RESET_ALL)
     print(
-        Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Closing Program and logging.")
+        Fore.YELLOW + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Closing Program and logging.")
     sys.stdout.logfile.close()
     archive_logs()  # Archive old logs
     time.sleep(2)
@@ -121,6 +122,8 @@ def download_menu():
 
 
 def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
+    global RETRIES
+
     # Create temporary directory if it doesn't exist
     if not os.path.exists(temp_directory):
         os.makedirs(temp_directory)
@@ -136,7 +139,7 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
 
     # Define the function to download and compress a single URL
 
-    def download_and_compress(url):
+    def download_and_compress(url, retry_count=0):
         nonlocal count
         nonlocal bar
         nonlocal retry_urls
@@ -173,17 +176,23 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
                     Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Downloaded: {filename}" + Style.RESET_ALL)
 
             else:
-                # If server error, add the URL to the retry list
-                error_msg = ERROR_CODES.get(
-                    response.status_code, "Unknown Error")
-                print(
-                    Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download: {url}. Status code: {response.status_code} ({error_msg})" + Style.RESET_ALL)
-                retry_urls.append(url)
+                # If server error and retries available, retry downloading
+                if retry_count < RETRIES:
+                    # Add to retry list with incremented retry count
+                    retry_urls.append((url, retry_count + 1))
+                else:
+                    error_msg = ERROR_CODES.get(
+                        response.status_code, "Unknown Error")
+                    print(
+                        Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to download: {url}. Status code: {response.status_code} ({error_msg})" + Style.RESET_ALL)
         except requests.exceptions.RequestException as e:
-            # If any exception occurs, add the URL to the retry list
-            print(
-                Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading {url}: {e}" + Style.RESET_ALL)
-            retry_urls.append(url)
+            # If any exception occurs and retries available, retry downloading
+            if retry_count < RETRIES:
+                # Add to retry list with incremented retry count
+                retry_urls.append((url, retry_count + 1))
+            else:
+                print(
+                    Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error downloading {url}: {e}" + Style.RESET_ALL)
 
         # Increment the current item counter
         bar.next()
@@ -200,16 +209,18 @@ def download_stuff(urls_dict, temp_directory, output_dir, source='R'):
 
     # Retry downloading missing files
     if retry_urls:
-        print(Fore.PURPLE +
+        print(Fore.MAGENTA +
               f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Retrying to download missing or corrupted files..." + Style.RESET_ALL)
 
+        # Convert retry_urls list to dictionary with file types
         retry_urls_dict = {
-            'images': retry_urls,
-            'videos': [],
-            'gifs': []
+            'images': [url for url, _ in retry_urls],
+            'videos': [url for url, _ in retry_urls],
+            'gifs': [url for url, _ in retry_urls]
         }
         download_stuff(retry_urls_dict, temp_directory,
                        output_dir, source)
+
     print(Fore.GREEN +
           f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] All downloads and compressions complete." + Style.RESET_ALL)
     input("Press enter to return to the menu")
@@ -229,7 +240,7 @@ def kemono_coomer_downloader():
     source = 'L'
     all_media_links = {'images': [], 'videos': [], 'gifs': []}
 
-    for input_data in inputs:
+    def process_input(input_data):
         website = input_data['website']
         service = input_data['service']
         model = input_data['model']
@@ -243,7 +254,7 @@ def kemono_coomer_downloader():
         else:
             print(
                 f"{Fore.PURPLE}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Unknown website: {website}{Style.RESET_ALL}")
-            continue
+            return []
 
         if model.startswith("http"):
             # Remove base_url from direct link
@@ -267,7 +278,7 @@ def kemono_coomer_downloader():
             if target_id is None:
                 print(
                     f"{Fore.YELLOW}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No ID found for model: {model}, service: {service}. Skipping...{Style.RESET_ALL}")
-                continue
+                return []
 
         offset = 0
         media_links = []
@@ -297,11 +308,33 @@ def kemono_coomer_downloader():
 
             offset += 50
 
-        all_media_links['images'].extend(media_links)
+        return media_links
+
+    # Process input data using multithreading
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Submit tasks for each input data
+        futures = [executor.submit(process_input, input_data)
+                   for input_data in inputs]
+
+        # Retrieve results and merge into the main dictionary
+        for future in concurrent.futures.as_completed(futures):
+            media_links = future.result()
+            for media_type, urls in media_links.items():
+                all_media_links[media_type].extend(urls)
+
+    # Print confirmation
+    total_images = len(all_media_links['images'])
+    total_videos = len(all_media_links['videos'])
+    total_gifs = len(all_media_links['gifs'])
+    confirmation = input(
+        Fore.YELLOW + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] This will download a total of {total_images} images, {total_videos} videos, and {total_gifs} GIFs. Do you want to continue? (yes/no): " + Style.RESET_ALL)
+    if confirmation.lower() != 'yes':
+        print(Fore.YELLOW +
+              f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Download aborted." + Style.RESET_ALL)
+        menu()
 
     # Pass all_media_links dictionary to download_stuff function
-    download_stuff(all_media_links, temp_directory,
-                   output_dir, source)
+    download_stuff(all_media_links, temp_directory, output_dir, source)
 
 
 def fetch_creators_info(api_url):
@@ -335,23 +368,53 @@ def Luscious_downloader():
     source = 'L'
     all_media_links = {'images': [], 'videos': [], 'gifs': []}
 
-    # Iterate over album URLs and get content URLs
-    for album_url in album_urls:
+    # Define the function to process each album URL and get content URLs
+    def process_album(album_url):
         try:
+            print(Fore.MAGENTA +
+                  f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Started processing album: {album_url}" + Style.RESET_ALL)
             # Create an Album object based on the album URL
             album = luscious.Album(album_url)
-
             # Get the list of content URLs (image links) from the album
             content_urls = album.contentUrls
-
-            # Extend the all_media_links list with content_urls
             all_media_links['images'].extend(content_urls)
+            return album.contentUrls
         except Exception as e:
             print(f"Error processing album {album_url}: {e}")
+            return []
+
+    # Process album URLs using multithreading
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Submit tasks for each album URL
+        futures = [executor.submit(process_album, album_url)
+                   for album_url in album_urls]
+
+        # Retrieve results and merge into the main dictionary
+        for future in concurrent.futures.as_completed(futures):
+            content_urls = future.result()
+            for content_url in content_urls:
+                for content in content_url:
+                    if 'type' in content:
+                        if content['type'] == 'image':
+                            all_media_links['images'].append(content['url'])
+                        elif content['type'] == 'video':
+                            all_media_links['videos'].append(content['url'])
+                        elif content['type'] == 'gif':
+                            all_media_links['gifs'].append(content['url'])
+
+    # Print confirmation
+    total_images = len(all_media_links['images'])
+    total_videos = len(all_media_links['videos'])
+    total_gifs = len(all_media_links['gifs'])
+    confirmation = input(
+        Fore.YELLOW + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] This will download a total of {total_images} images, {total_videos} videos, and {total_gifs} GIFs. Do you want to continue? (yes/no): " + Style.RESET_ALL)
+    if confirmation.lower() != 'yes':
+        print(Fore.YELLOW +
+              f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Download aborted." + Style.RESET_ALL)
+        menu()
 
     # Pass all_media_links dictionary to download_stuff function
-    download_stuff(all_media_links, temp_directory,
-                   output_dir, source)
+    download_stuff(all_media_links, temp_directory, output_dir, source)
 
 
 def R34_downloader():
@@ -365,7 +428,6 @@ def R34_downloader():
     else:
         blacklisted_tags = blacklisted_tags.get('tags', set())
     source = "R"
-    # Create database manager instance
 
     temp_directory = os.path.join(os.getcwd(), "tmp")
     output_dir = os.path.join(os.getcwd(), "output")
