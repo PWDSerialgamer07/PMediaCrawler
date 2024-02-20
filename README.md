@@ -50,8 +50,9 @@ These are the error codes that if received when downloading a file will have tha
 - 429: Too Many Requests
 Will add more if needed
 
-### Known bugs
+### Known problems
 - Archived logs will lack a file extension (no idea how to fix this)
+- Kemono.su likes to timeout users for god knows why.
 
 ### Disclaimer
 
