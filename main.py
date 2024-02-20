@@ -310,17 +310,11 @@ def kemono_coomer_downloader():
 
         return media_links
 
-    # Process input data using multithreading
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        # Submit tasks for each input data
-        futures = [executor.submit(process_input, input_data)
-                   for input_data in inputs]
-
-        # Retrieve results and merge into the main dictionary
-        for future in concurrent.futures.as_completed(futures):
-            media_links = future.result()
-            for media_type, urls in media_links.items():
-                all_media_links[media_type].extend(urls)
+    # Process input data serially
+    for input_data in inputs:
+        media_links = process_input(input_data)
+        for media_type, urls in media_links.items():
+            all_media_links[media_type].extend(urls)
 
     # Print confirmation
     total_images = len(all_media_links['images'])
