@@ -69,3 +69,4 @@ This script is for educational purposes only. Respect the terms of service of th
 - [ ] File organisation option
 - [ ] Some way to differentiate images with their tags/URLs
 - [ ] Mega.nz support
+- [ ] Bringing back db support, once I understand it better
