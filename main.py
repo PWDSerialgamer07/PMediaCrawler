@@ -560,9 +560,11 @@ def compress_video(filepath, output_dir):
         ], check=True)
         os.remove(filepath)  # Delete the original file after compression
         end_time = datetime.now()
-        print(f"Compression completed in {(end_time - start_time)}")
+        print(
+            Fore.GREEN + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Compression completed in {(end_time - start_time)}" + Style.RESET_ALL)
     except subprocess.CalledProcessError as e:
-        print(f"Error: {e}")
+        print(
+            Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error compressing video: {e}" + Style.RESET_ALL)
 
 
 def split_console():
