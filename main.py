@@ -4,6 +4,7 @@ import os
 import time
 import requests
 from threading import Lock
+import subprocess
 import luscious
 import xml.etree.ElementTree as ET
 import shutil
@@ -310,11 +311,17 @@ def kemono_coomer_downloader():
 
         return media_links
 
-    # Process input data serially
-    for input_data in inputs:
-        media_links = process_input(input_data)
-        for media_type, urls in media_links.items():
-            all_media_links[media_type].extend(urls)
+    # Process input data using multithreading
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Submit tasks for each input data
+        futures = [executor.submit(process_input, input_data)
+                   for input_data in inputs]
+
+        # Retrieve results and merge into the main dictionary
+        for future in concurrent.futures.as_completed(futures):
+            media_links = future.result()
+            for media_type, urls in media_links.items():
+                all_media_links[media_type].extend(urls)
 
     # Print confirmation
     total_images = len(all_media_links['images'])
@@ -539,16 +546,23 @@ def compress_gif(filepath, output_dir):
 
 
 def compress_video(filepath, output_dir):
-    """Compress the video file."""
+    """Compress the video file using ffmpeg with GPU acceleration."""
+    start_time = datetime.now()
     try:
         filename = os.path.basename(filepath)
         output_filepath = os.path.join(output_dir, filename)
-        clip = VideoFileClip(filepath)
-        clip.write_videofile(output_filepath, bitrate=VIDEO_BITRATE, )
+        # Run ffmpeg command for video compression with GPU acceleration
+        subprocess.run([
+            'ffmpeg', '-y', '-i', filepath,
+            '-c:v', 'h264_nvenc', '-b:v', VIDEO_BITRATE,  # Using H.264 codec with NVENC
+            '-c:a', 'aac', '-b:a', '128k',  # AAC audio codec with 128kbps bitrate
+            output_filepath
+        ], check=True)
         os.remove(filepath)  # Delete the original file after compression
-    except Exception as e:
-        print(
-            Fore.RED + f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error compressing video: {e}" + Style.RESET_ALL)
+        end_time = datetime.now()
+        print(f"Compression completed in {(end_time - start_time)}")
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e}")
 
 
 def split_console():
