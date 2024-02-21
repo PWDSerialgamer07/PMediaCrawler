@@ -61,12 +61,12 @@ This script is for educational purposes only. Respect the terms of service of th
 ### Planned
 - [ ] Settings Menu
 - [ ] Support for Pixiv
-- [ ] Download Resuming
-- [ ] Download History
+- [ ] Download Resuming (will be done with the db)
+- [ ] Download History (will be done with the db)
 - [ ] Integration with cloud storage
 - [x] File based logging
 - [ ] Better terminal splitting
 - [ ] File organisation option
-- [ ] Some way to differentiate images with their tags/URLs
+- [ ] Some way to differentiate images with their tags/URLs (probably will be the files having their name start with the tag and/or separated in folder names after url/tags)
 - [ ] Mega.nz support
 - [ ] Bringing back db support, once I understand it better
