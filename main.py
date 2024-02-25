@@ -20,6 +20,7 @@ from colorama import init, Fore, Style
 from datetime import datetime
 import json
 import gzip
+from urllib.parse import urlparse
 import atexit
 from progress.bar import ChargingBar
 import re
@@ -254,8 +255,8 @@ def kemono_coomer_downloader():
             base_url = 'https://kemono.su'
         else:
             print(
-                f"{Fore.PURPLE}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Unknown website: {website}{Style.RESET_ALL}")
-            return []
+                f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Unknown website: {website}{Style.RESET_ALL}")
+            return {}
 
         if model.startswith("http"):
             # Remove base_url from direct link
@@ -266,7 +267,7 @@ def kemono_coomer_downloader():
             if not creators_info:
                 print(
                     f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No creators information available. Exiting...{Style.RESET_ALL}")
-                return []
+                return {}
 
             target_id = None
             for creator in creators_info:
@@ -279,10 +280,10 @@ def kemono_coomer_downloader():
             if target_id is None:
                 print(
                     f"{Fore.YELLOW}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No ID found for model: {model}, service: {service}. Skipping...{Style.RESET_ALL}")
-                return []
+                return {}
 
         offset = 0
-        media_links = []
+        media_links = {'images': [], 'videos': [], 'gifs': []}
 
         while True:
             get_url = f'{api_url}/{service}/user/{target_id}?o={offset}'
@@ -297,15 +298,15 @@ def kemono_coomer_downloader():
                     for attachment in item['attachments']:
                         path = attachment['path']
                         if base_url:
-                            media_links.append(f"{base_url}{path}")
+                            media_links['images'].append(f"{base_url}{path}")
                         else:
-                            media_links.append(path)
+                            media_links['images'].append(path)
                 if 'file' in item and 'path' in item['file']:
                     path = item['file']['path']
                     if base_url:
-                        media_links.append(f"{base_url}{path}")
+                        media_links['videos'].append(f"{base_url}{path}")
                     else:
-                        media_links.append(path)
+                        media_links['videos'].append(path)
 
             offset += 50
 
@@ -596,16 +597,33 @@ def open_input_file(file_path, item_type='line', blacklist=False):
                     line_dict = {'tags': tags}
                     lines_data.append(line_dict)
                 elif item_type == 'input':
-                    if ':' in line:  # Assume it's in website:service:model format
-                        website, service, model = line.split(':')
-                        lines_data.append(
-                            {'website': website, 'service': service, 'model': model})
-                    elif line.startswith("http"):  # Assume it's a direct URL
-                        lines_data.append({'url': line})
-                    else:  # Assume it's just an ID
-                        lines_data.append({'id': line})
+                    if line.startswith("https://"):  # Assume it's a direct URL
+                        # Parse the URL
+                        parsed_url = urlparse(line)
+                        # Extract website, service, and model from the URL
+                        website = parsed_url.netloc.split('.')[0]
+                        path_parts = parsed_url.path.split('/')
+                        if len(path_parts) >= 4:
+                            service = path_parts[1]
+                            model = path_parts[3]
+                            lines_data.append(
+                                {'website': website, 'service': service, 'model': model})
+                        else:
+                            print(
+                                f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] URL '{line}' does not match expected format.{Style.RESET_ALL}")
+                    else:  # Treat as website:service:model format
+                        parts = line.split(':')
+                        if len(parts) == 3:
+                            website, service, model = parts
+                            lines_data.append(
+                                {'website': website, 'service': service, 'model': model})
+                        else:
+                            print(
+                                f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Input '{line}' does not match expected format.{Style.RESET_ALL}")
+
     except FileNotFoundError:
-        print(f"File '{file_path}' not found. Creating a new one.")
+        print(
+            f"{Fore.RED}[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] File '{file_path}' not found. Creating a new one.{Style.RESET_ALL}")
 
     return lines_data
 
