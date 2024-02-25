@@ -553,9 +553,9 @@ def compress_video(filepath, output_dir):
         output_filepath = os.path.join(output_dir, filename)
         # Run ffmpeg command for video compression with GPU acceleration
         subprocess.run([
-            'ffmpeg', '-y', '-i', filepath,
-            '-c:v', 'h264_nvenc', '-b:v', VIDEO_BITRATE,  # Using H.264 codec with NVENC
-            '-c:a', 'aac', '-b:a', '128k',  # AAC audio codec with 128kbps bitrate
+            'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', filepath,
+            '-c:v', 'h264_nvenc', '-b:v', VIDEO_BITRATE,
+            '-c:a', 'aac', '-b:a', '128k',
             output_filepath
         ], check=True)
         os.remove(filepath)  # Delete the original file after compression
