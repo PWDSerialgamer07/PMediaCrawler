@@ -21,10 +21,12 @@ This Python script allows you to download media content from various websites in
      ```
 
 3. **Kemono/Coomer**
-   - Set them in `IDs.txt` in the format: `website:service:name`
+   - Set them in `IDs.txt` in the format: `website:service:name`, or using a URL
      ```
      coomer:fansly:morgpie
      kemono:patreon:Jtveemo
+     https://coomer.su/onlyfans/user/sierralisabeth
+     https://kemono.su/patreon/user/3295915
      ```
 
 ### Important Note
@@ -53,6 +55,7 @@ Will add more if needed
 ### Known problems
 - Archived logs will lack a file extension (no idea how to fix this)
 - Kemono.su likes to timeout users for god knows why.
+- Progress bar and file counter is bugged with the kemono_coomer downloaders
 
 ### Disclaimer
 
